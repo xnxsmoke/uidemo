@@ -1,6 +1,5 @@
--- MinimalFluentRayfield.lua
--- Libreria UI minimal Fluent + Rayfield (solo logica)
-
+-- =================== MinimalFluentRayfield All-in-One ===================
+-- Libreria UI minimal Fluent + Rayfield
 local MinimalFluentRayfield = {}
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -34,7 +33,7 @@ end
 
 LoadConfig()
 
--- Creazione finestra
+-- =================== Create Window ===================
 function MinimalFluentRayfield:CreateWindow(title)
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "MinimalFluentRayfieldUI"
@@ -48,7 +47,7 @@ function MinimalFluentRayfield:CreateWindow(title)
     Frame.Parent = ScreenGui
     Frame.ClipsDescendants = true
 
-    -- Barra titolo
+    -- Title
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.Size = UDim2.new(1,0,0,40)
     TitleLabel.BackgroundTransparency = 1
@@ -58,8 +57,22 @@ function MinimalFluentRayfield:CreateWindow(title)
     TitleLabel.TextColor3 = Color3.fromRGB(255,255,255)
     TitleLabel.Parent = Frame
 
-    -- Drag & Move
-    local dragging, dragInput, dragStart, startPos = false,nil,nil,nil
+    -- =================== Drag & Move Migliorato ===================
+    local dragging=false
+    local dragInput=nil
+    local dragStart=nil
+    local startPos=nil
+
+    local function updatePosition(input)
+        local delta = input.Position - dragStart
+        Frame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+
     TitleLabel.InputBegan:Connect(function(input)
         if input.UserInputType==Enum.UserInputType.MouseButton1 then
             dragging=true
@@ -70,19 +83,22 @@ function MinimalFluentRayfield:CreateWindow(title)
             end)
         end
     end)
+
     TitleLabel.InputChanged:Connect(function(input)
-        if input.UserInputType==Enum.UserInputType.MouseMovement then dragInput=input end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if input==dragInput and dragging then
-            local delta=input.Position-dragStart
-            Frame.Position=UDim2.new(0,startPos.X.Offset+delta.X,0,startPos.Y.Offset+delta.Y)
+        if input.UserInputType==Enum.UserInputType.MouseMovement then
+            dragInput=input
         end
     end)
 
-    -- Minimizzazione con CTRL
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input==dragInput then
+            updatePosition(input)
+        end
+    end)
+
+    -- =================== Minimizzazione CTRL ===================
     local isMinimized=false
-    UserInputService.InputBegan:Connect(function(input, processed)
+    UserInputService.InputBegan:Connect(function(input,processed)
         if processed then return end
         if input.KeyCode==Enum.KeyCode.LeftControl then
             if isMinimized then
@@ -95,7 +111,7 @@ function MinimalFluentRayfield:CreateWindow(title)
         end
     end)
 
-    -- Tab bar
+    -- =================== Tab Bar ===================
     local TabBar = Instance.new("Frame")
     TabBar.Size = UDim2.new(1,0,0,30)
     TabBar.Position = UDim2.new(0,0,0,40)
@@ -114,10 +130,10 @@ function MinimalFluentRayfield:CreateWindow(title)
     ContentFrame.Parent = Frame
 
     local function updateCanvasSize()
-        local lastY = 0
+        local lastY=0
         for _,child in ipairs(ContentFrame:GetChildren()) do
             if child:IsA("GuiObject") then
-                local bottom = child.Position.Y.Offset+child.Size.Y.Offset
+                local bottom = child.Position.Y.Offset + child.Size.Y.Offset
                 if bottom>lastY then lastY=bottom end
             end
         end
@@ -126,7 +142,7 @@ function MinimalFluentRayfield:CreateWindow(title)
 
     local window = {Frame=Frame, Tabs=Tabs, ContentFrame=ContentFrame}
 
-    -- Funzione per aggiungere tab
+    -- =================== Add Tab ===================
     function window:AddTab(name)
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0,100,1,0)
@@ -153,36 +169,38 @@ function MinimalFluentRayfield:CreateWindow(title)
         local tabData = {Button=btn, Container=tabContainer, YOffset=0}
         Tabs[name]=tabData
 
-        function tabData:AddButton(text, callback)
+        -- =================== Add Button ===================
+        function tabData:AddButton(text,callback)
             local b = Instance.new("TextButton")
-            b.Size = UDim2.new(1,-20,0,30)
-            b.Position = UDim2.new(0,10,0,tabData.YOffset)
-            b.BackgroundColor3 = Color3.fromRGB(50,50,50)
-            b.Text = text
-            b.TextColor3 = Color3.fromRGB(255,255,255)
-            b.Font = Enum.Font.Gotham
-            b.TextSize = 16
-            b.Parent = tabContainer
+            b.Size=UDim2.new(1,-20,0,30)
+            b.Position=UDim2.new(0,10,0,tabData.YOffset)
+            b.BackgroundColor3=Color3.fromRGB(50,50,50)
+            b.Text=text
+            b.TextColor3=Color3.fromRGB(255,255,255)
+            b.Font=Enum.Font.Gotham
+            b.TextSize=16
+            b.Parent=tabContainer
             b.MouseButton1Click:Connect(callback)
             tabData.YOffset = tabData.YOffset + 40
             updateCanvasSize()
         end
 
-        function tabData:AddToggle(text, default, callback)
+        -- =================== Add Toggle ===================
+        function tabData:AddToggle(text,default,callback)
             local key=text
             local state = Configs[key] ~= nil and Configs[key] or default
             local t = Instance.new("TextButton")
-            t.Size = UDim2.new(1,-20,0,30)
-            t.Position = UDim2.new(0,10,0,tabData.YOffset)
-            t.BackgroundColor3 = Color3.fromRGB(50,50,50)
-            t.Text = text..": "..(state and "ON" or "OFF")
-            t.TextColor3 = Color3.fromRGB(255,255,255)
-            t.Font = Enum.Font.Gotham
-            t.TextSize = 16
-            t.Parent = tabContainer
+            t.Size=UDim2.new(1,-20,0,30)
+            t.Position=UDim2.new(0,10,0,tabData.YOffset)
+            t.BackgroundColor3=Color3.fromRGB(50,50,50)
+            t.Text=text..": "..(state and "ON" or "OFF")
+            t.TextColor3=Color3.fromRGB(255,255,255)
+            t.Font=Enum.Font.Gotham
+            t.TextSize=16
+            t.Parent=tabContainer
             t.MouseButton1Click:Connect(function()
                 state = not state
-                t.Text = text..": "..(state and "ON" or "OFF")
+                t.Text=text..": "..(state and "ON" or "OFF")
                 Configs[key] = state
                 SaveConfig()
                 callback(state)
@@ -197,4 +215,5 @@ function MinimalFluentRayfield:CreateWindow(title)
     return window
 end
 
+-- =================== Return Libreria ===================
 return MinimalFluentRayfield
