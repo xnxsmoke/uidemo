@@ -1,35 +1,68 @@
--- MinimalFluentUI.lua (Standalone, per test con loadstring)
+-- MinimalFluentRayfield.lua
+-- Libreria UI in stile Fluent con auto-save config e drag-and-move
 
-local MinimalFluentUI = {}
-
+local MinimalFluentRayfield = {}
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-function MinimalFluentUI:CreateWindow(title)
+-- Config auto-save
+local Configs = {}
+local ConfigName = "MinimalFluentConfig" -- Nome config salvata in PlayerGui
+
+-- Carica config se esiste
+local function LoadConfig()
+    local folder = PlayerGui:FindFirstChild(ConfigName)
+    if folder and folder:FindFirstChild("Data") then
+        local data = folder.Data.Value
+        local success, decoded = pcall(HttpService.JSONDecode, HttpService, data)
+        if success and type(decoded) == "table" then
+            Configs = decoded
+        end
+    end
+end
+
+-- Salva config
+local function SaveConfig()
+    local folder = PlayerGui:FindFirstChild(ConfigName) or Instance.new("Folder")
+    folder.Name = ConfigName
+    folder.Parent = PlayerGui
+    local data = folder:FindFirstChild("Data") or Instance.new("StringValue")
+    data.Name = "Data"
+    data.Value = HttpService:JSONEncode(Configs)
+    data.Parent = folder
+end
+
+LoadConfig()
+
+-- Crea finestra
+function MinimalFluentRayfield:CreateWindow(title)
     local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "MinimalFluentUI"
+    ScreenGui.Name = "MinimalFluentRayfieldUI"
     ScreenGui.Parent = PlayerGui
 
     local Frame = Instance.new("Frame")
     Frame.Size = UDim2.new(0, 350, 0, 400)
     Frame.Position = UDim2.new(0.5, -175, 0.5, -200)
-    Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
     Frame.BorderSizePixel = 0
     Frame.Parent = ScreenGui
+    Frame.ClipsDescendants = true
 
+    -- Barra titolo
     local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Size = UDim2.new(1,0,0,40)
+    TitleLabel.Size = UDim2.new(1, 0, 0, 40)
     TitleLabel.BackgroundTransparency = 1
     TitleLabel.Text = title
-    TitleLabel.TextColor3 = Color3.fromRGB(255,255,255)
     TitleLabel.Font = Enum.Font.GothamBold
     TitleLabel.TextSize = 20
+    TitleLabel.TextColor3 = Color3.fromRGB(255,255,255)
     TitleLabel.Parent = Frame
 
-    -- Drag
+    -- Drag & Move
     local dragging, dragInput, mousePos, framePos = false,nil,Vector2.new(),UDim2.new()
     local function update(input)
         local delta = input.Position - mousePos
@@ -52,10 +85,11 @@ function MinimalFluentUI:CreateWindow(title)
         if input == dragInput and dragging then update(input) end
     end)
 
-    -- Elements
+    -- Container elementi
     local yOffset = 50
     local window = {}
 
+    -- Aggiunge Button
     function window:AddButton(text, callback)
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(1,-20,0,30)
@@ -66,41 +100,53 @@ function MinimalFluentUI:CreateWindow(title)
         btn.Font = Enum.Font.Gotham
         btn.TextSize = 16
         btn.Parent = Frame
+
         btn.MouseEnter:Connect(function()
-            TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3=Color3.fromRGB(70,70,70)}):Play()
+            TweenService:Create(btn,TweenInfo.new(0.2),{BackgroundColor3=Color3.fromRGB(70,70,70)}):Play()
         end)
         btn.MouseLeave:Connect(function()
-            TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3=Color3.fromRGB(50,50,50)}):Play()
+            TweenService:Create(btn,TweenInfo.new(0.2),{BackgroundColor3=Color3.fromRGB(50,50,50)}):Play()
         end)
+
         btn.MouseButton1Click:Connect(callback)
-        yOffset=yOffset+40
+        yOffset = yOffset + 40
     end
 
+    -- Aggiunge Toggle
     function window:AddToggle(text, default, callback)
+        local key = text
+        local state = Configs[key] ~= nil and Configs[key] or default
+
         local toggle = Instance.new("TextButton")
         toggle.Size = UDim2.new(1,-20,0,30)
         toggle.Position = UDim2.new(0,10,0,yOffset)
         toggle.BackgroundColor3 = Color3.fromRGB(50,50,50)
-        toggle.Text = text..": "..(default and "ON" or "OFF")
+        toggle.Text = text..": "..(state and "ON" or "OFF")
         toggle.TextColor3 = Color3.fromRGB(255,255,255)
         toggle.Font = Enum.Font.Gotham
         toggle.TextSize = 16
         toggle.Parent = Frame
-        local state = default
+
         toggle.MouseButton1Click:Connect(function()
             state = not state
             toggle.Text = text..": "..(state and "ON" or "OFF")
+            Configs[key] = state
+            SaveConfig()
             callback(state)
         end)
-        yOffset=yOffset+40
+        yOffset = yOffset + 40
     end
 
-    function window:AddSlider(text, min, max, default, callback)
+    -- Aggiunge Slider
+    function window:AddSlider(text,min,max,default,callback)
+        local key = text
+        local value = Configs[key] ~= nil and Configs[key] or default
+
         local label = Instance.new("TextLabel")
         label.Size = UDim2.new(1,-20,0,20)
         label.Position = UDim2.new(0,10,0,yOffset)
         label.BackgroundTransparency = 1
-        label.Text = text..": "..tostring(default)
+        label.Text = text..": "..tostring(value)
         label.TextColor3 = Color3.fromRGB(255,255,255)
         label.Font = Enum.Font.Gotham
         label.TextSize = 16
@@ -114,7 +160,7 @@ function MinimalFluentUI:CreateWindow(title)
         slider.Parent = Frame
 
         local fill = Instance.new("Frame")
-        fill.Size = UDim2.new((default-min)/(max-min),0,1,0)
+        fill.Size = UDim2.new((value-min)/(max-min),0,1,0)
         fill.BackgroundColor3 = Color3.fromRGB(100,100,255)
         fill.Parent = slider
 
@@ -129,16 +175,20 @@ function MinimalFluentUI:CreateWindow(title)
             if dragging and input.UserInputType==Enum.UserInputType.MouseMovement then
                 local relative = math.clamp((input.Position.X - slider.AbsolutePosition.X)/slider.AbsoluteSize.X,0,1)
                 fill.Size = UDim2.new(relative,0,1,0)
-                local value = math.floor(min + (max-min)*relative)
+                value = math.floor(min + (max-min)*relative)
                 label.Text = text..": "..tostring(value)
+                Configs[key] = value
+                SaveConfig()
                 callback(value)
             end
         end)
 
-        yOffset=yOffset+40
+        yOffset = yOffset + 40
     end
+
+    -- TODO: Aggiungere Dropdown e TextBox se necessario
 
     return window
 end
 
-return MinimalFluentUI
+return MinimalFluentRayfield
