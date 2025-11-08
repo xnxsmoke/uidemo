@@ -1,4 +1,5 @@
 -- MinimalFluentRayfield.lua (Standalone, Fluent-style con Drag & Auto-save)
+
 local MinimalFluentRayfield = {}
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
@@ -59,28 +60,33 @@ function MinimalFluentRayfield:CreateWindow(title)
     TitleLabel.TextColor3 = Color3.fromRGB(255,255,255)
     TitleLabel.Parent = Frame
 
-    -- Drag & Move
-    local dragging, dragInput, mousePos, framePos = false,nil,Vector2.new(),UDim2.new()
-    local function update(input)
-        local delta = input.Position - mousePos
-        Frame.Position = UDim2.new(0, framePos.X.Offset + delta.X, 0, framePos.Y.Offset + delta.Y)
-    end
+    -- Drag & Move funzionante
+    local dragging = false
+    local dragInput, dragStart, startPos
+
     TitleLabel.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
-            mousePos = input.Position
-            framePos = Frame.Position
+            dragStart = input.Position
+            startPos = Frame.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging=false end
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
             end)
         end
     end)
+
     TitleLabel.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput=input end
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
     end)
+
     UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
-            update(input)
+            local delta = input.Position - dragStart
+            Frame.Position = UDim2.new(0, startPos.X.Offset + delta.X, 0, startPos.Y.Offset + delta.Y)
         end
     end)
 
@@ -88,7 +94,7 @@ function MinimalFluentRayfield:CreateWindow(title)
     local yOffset = 50
     local window = {}
 
-    -- Button
+    -- Pulsante
     function window:AddButton(text, callback)
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(1,-20,0,30)
