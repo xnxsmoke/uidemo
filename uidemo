@@ -1,13 +1,46 @@
-function MinimalFluentRayfield:CreateWindow(title)
-    -- =================== Rimuovi vecchie UI ===================
-    local existing = PlayerGui:FindFirstChild("MinimalFluentRayfieldUI")
-    if existing then
-        existing:Destroy()
+-- =================== MinimalFluentRayfield All-in-One ===================
+local MinimalFluentRayfield = {}
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Config auto-save
+local Configs = {}
+local ConfigName = "MinimalFluentRayfieldConfig"
+
+local function LoadConfig()
+    local folder = PlayerGui:FindFirstChild(ConfigName)
+    if folder and folder:FindFirstChild("Data") then
+        local success, decoded = pcall(HttpService.JSONDecode, HttpService, folder.Data.Value)
+        if success and type(decoded) == "table" then
+            Configs = decoded
+        end
     end
+end
+
+local function SaveConfig()
+    local folder = PlayerGui:FindFirstChild(ConfigName) or Instance.new("Folder")
+    folder.Name = ConfigName
+    folder.Parent = PlayerGui
+    local data = folder:FindFirstChild("Data") or Instance.new("StringValue")
+    data.Name = "Data"
+    data.Value = HttpService:JSONEncode(Configs)
+    data.Parent = folder
+end
+
+LoadConfig()
+
+-- =================== Create Window ===================
+function MinimalFluentRayfield:CreateWindow(title)
+    -- Rimuovi vecchie UI se esistono
+    local existing = PlayerGui:FindFirstChild("MinimalFluentRayfieldUI")
+    if existing then existing:Destroy() end
 
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "MinimalFluentRayfieldUI"
-    ScreenGui.ResetOnSpawn = false -- mantiene la GUI anche se si ricarica
+    ScreenGui.ResetOnSpawn = false
     ScreenGui.Parent = PlayerGui
 
     local Frame = Instance.new("Frame")
@@ -63,9 +96,9 @@ function MinimalFluentRayfield:CreateWindow(title)
         end
     end)
 
-    -- =================== Minimizzazione con CTRL ===================
+    -- =================== Minimizzazione CTRL ===================
     local isMinimized=false
-    UserInputService.InputBegan:Connect(function(input, processed)
+    UserInputService.InputBegan:Connect(function(input,processed)
         if processed then return end
         if input.KeyCode==Enum.KeyCode.LeftControl then
             if isMinimized then
@@ -78,8 +111,108 @@ function MinimalFluentRayfield:CreateWindow(title)
         end
     end)
 
-    -- Il resto della libreria (Tabs, Buttons, Toggle, Scroll, Auto-save) rimane uguale
-    -- ...
+    -- =================== Tab Bar ===================
+    local TabBar = Instance.new("Frame")
+    TabBar.Size = UDim2.new(1,0,0,30)
+    TabBar.Position = UDim2.new(0,0,0,40)
+    TabBar.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    TabBar.Parent = Frame
+
+    local Tabs = {}
+    local currentTab = nil
+
+    local ContentFrame = Instance.new("ScrollingFrame")
+    ContentFrame.Size = UDim2.new(1,0,1,-70)
+    ContentFrame.Position = UDim2.new(0,0,0,70)
+    ContentFrame.CanvasSize = UDim2.new(0,0,0,0)
+    ContentFrame.ScrollBarThickness = 6
+    ContentFrame.BackgroundTransparency = 1
+    ContentFrame.Parent = Frame
+
+    local function updateCanvasSize()
+        local lastY=0
+        for _,child in ipairs(ContentFrame:GetChildren()) do
+            if child:IsA("GuiObject") then
+                local bottom = child.Position.Y.Offset + child.Size.Y.Offset
+                if bottom>lastY then lastY=bottom end
+            end
+        end
+        ContentFrame.CanvasSize = UDim2.new(0,0,lastY+20,0)
+    end
+
+    local window = {Frame=Frame, Tabs=Tabs, ContentFrame=ContentFrame}
+
+    -- =================== Add Tab ===================
+    function window:AddTab(name)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0,100,1,0)
+        btn.Position = UDim2.new(#Tabs*0.3,0,0,0)
+        btn.Text = name
+        btn.Font = Enum.Font.Gotham
+        btn.TextSize = 16
+        btn.TextColor3 = Color3.fromRGB(255,255,255)
+        btn.BackgroundColor3 = Color3.fromRGB(45,45,45)
+        btn.Parent = TabBar
+
+        local tabContainer = Instance.new("Frame")
+        tabContainer.Size = UDim2.new(1,0,1,0)
+        tabContainer.BackgroundTransparency = 1
+        tabContainer.Visible = false
+        tabContainer.Parent = ContentFrame
+
+        btn.MouseButton1Click:Connect(function()
+            for _,t in pairs(Tabs) do t.Container.Visible=false end
+            tabContainer.Visible=true
+            currentTab=tabContainer
+        end)
+
+        local tabData = {Button=btn, Container=tabContainer, YOffset=0}
+        Tabs[name]=tabData
+
+        -- =================== Add Button ===================
+        function tabData:AddButton(text,callback)
+            local b = Instance.new("TextButton")
+            b.Size=UDim2.new(1,-20,0,30)
+            b.Position=UDim2.new(0,10,0,tabData.YOffset)
+            b.BackgroundColor3=Color3.fromRGB(50,50,50)
+            b.Text=text
+            b.TextColor3=Color3.fromRGB(255,255,255)
+            b.Font=Enum.Font.Gotham
+            b.TextSize=16
+            b.Parent=tabContainer
+            b.MouseButton1Click:Connect(callback)
+            tabData.YOffset = tabData.YOffset + 40
+            updateCanvasSize()
+        end
+
+        -- =================== Add Toggle ===================
+        function tabData:AddToggle(text,default,callback)
+            local key=text
+            local state = Configs[key] ~= nil and Configs[key] or default
+            local t = Instance.new("TextButton")
+            t.Size=UDim2.new(1,-20,0,30)
+            t.Position=UDim2.new(0,10,0,tabData.YOffset)
+            t.BackgroundColor3=Color3.fromRGB(50,50,50)
+            t.Text=text..": "..(state and "ON" or "OFF")
+            t.TextColor3=Color3.fromRGB(255,255,255)
+            t.Font=Enum.Font.Gotham
+            t.TextSize=16
+            t.Parent=tabContainer
+            t.MouseButton1Click:Connect(function()
+                state = not state
+                t.Text=text..": "..(state and "ON" or "OFF")
+                Configs[key] = state
+                SaveConfig()
+                callback(state)
+            end)
+            tabData.YOffset = tabData.YOffset + 40
+            updateCanvasSize()
+        end
+
+        return tabData
+    end
 
     return window
 end
+
+return MinimalFluentRayfield
