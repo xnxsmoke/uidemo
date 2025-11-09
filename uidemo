@@ -1,4 +1,4 @@
--- =================== MinimalFluentRayfield Corretto ===================
+-- =================== MinimalFluentRayfield Completo ===================
 local MinimalFluentRayfield = {}
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -128,10 +128,6 @@ function MinimalFluentRayfield:CreateWindow(title)
     ContentFrame.ClipsDescendants = true
     ContentFrame.Parent = Frame
 
-    local function updateCanvasSize(tabData)
-        tabData.Container.CanvasSize = UDim2.new(0,0,0,tabData.YOffset + 20)
-    end
-
     local window = {Frame=Frame, Tabs=Tabs, ContentFrame=ContentFrame}
 
     -- =================== Add Tab ===================
@@ -176,7 +172,7 @@ function MinimalFluentRayfield:CreateWindow(title)
             b.Parent=tabContainer
             b.MouseButton1Click:Connect(callback)
             tabData.YOffset = tabData.YOffset + 40
-            updateCanvasSize(tabData)
+            tabData.Container.CanvasSize = UDim2.new(0,0,0,tabData.YOffset+20)
         end
 
         -- =================== Add Toggle ===================
@@ -200,7 +196,7 @@ function MinimalFluentRayfield:CreateWindow(title)
                 callback(state)
             end)
             tabData.YOffset = tabData.YOffset + 40
-            updateCanvasSize(tabData)
+            tabData.Container.CanvasSize = UDim2.new(0,0,0,tabData.YOffset+20)
         end
 
         -- =================== Add Dropdown ===================
@@ -251,7 +247,7 @@ function MinimalFluentRayfield:CreateWindow(title)
             end)
 
             tabData.YOffset = tabData.YOffset + 40
-            updateCanvasSize(tabData)
+            tabData.Container.CanvasSize = UDim2.new(0,0,0,tabData.YOffset+20)
         end
 
         -- =================== Add Slider ===================
@@ -293,16 +289,18 @@ function MinimalFluentRayfield:CreateWindow(title)
             end)
 
             tabData.YOffset = tabData.YOffset + 40
-            updateCanvasSize(tabData)
+            tabData.Container.CanvasSize = UDim2.new(0,0,0,tabData.YOffset+20)
         end
 
-        -- =================== Fine AddTab ===================
         return tabData
     end
 
     -- Mostra la prima tab automaticamente
     for _, tab in pairs(Tabs) do
-        tab.Container.Visible=true
+        tab.Container.Visible = false
+    end
+    for _, tab in pairs(Tabs) do
+        tab.Container.Visible = true
         currentTab=tab.Container
         break
     end
