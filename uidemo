@@ -1,4 +1,4 @@
--- =================== MinimalFluentRayfield Complete ===================
+-- =================== MinimalFluentRayfield Corretto ===================
 local MinimalFluentRayfield = {}
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -121,23 +121,15 @@ function MinimalFluentRayfield:CreateWindow(title)
     local Tabs = {}
     local currentTab = nil
 
-    local ContentFrame = Instance.new("ScrollingFrame")
-    ContentFrame.Size = UDim2.new(1,0,1,-70)
+    local ContentFrame = Instance.new("Frame")
+    ContentFrame.Size = UDim2.new(1,0,1, -70)
     ContentFrame.Position = UDim2.new(0,0,0,70)
-    ContentFrame.CanvasSize = UDim2.new(0,0,0,0)
-    ContentFrame.ScrollBarThickness = 6
     ContentFrame.BackgroundTransparency = 1
+    ContentFrame.ClipsDescendants = true
     ContentFrame.Parent = Frame
 
-    local function updateCanvasSize(tabContainer)
-        local lastY=0
-        for _,child in ipairs(tabContainer:GetChildren()) do
-            if child:IsA("GuiObject") then
-                local bottom = child.Position.Y.Offset + child.Size.Y.Offset
-                if bottom>lastY then lastY=bottom end
-            end
-        end
-        tabContainer.CanvasSize = UDim2.new(0,0,lastY+20,0)
+    local function updateCanvasSize(tabData)
+        tabData.Container.CanvasSize = UDim2.new(0,0,0,tabData.YOffset + 20)
     end
 
     local window = {Frame=Frame, Tabs=Tabs, ContentFrame=ContentFrame}
@@ -184,7 +176,7 @@ function MinimalFluentRayfield:CreateWindow(title)
             b.Parent=tabContainer
             b.MouseButton1Click:Connect(callback)
             tabData.YOffset = tabData.YOffset + 40
-            updateCanvasSize(tabContainer)
+            updateCanvasSize(tabData)
         end
 
         -- =================== Add Toggle ===================
@@ -208,27 +200,23 @@ function MinimalFluentRayfield:CreateWindow(title)
                 callback(state)
             end)
             tabData.YOffset = tabData.YOffset + 40
-            updateCanvasSize(tabContainer)
+            updateCanvasSize(tabData)
         end
 
         -- =================== Add Dropdown ===================
         function tabData:AddDropdown(text,values,default,callback)
             local key=text
             local selected = Configs[key] ~= nil and Configs[key] or default
-            local frame = Instance.new("Frame")
+
+            local frame = Instance.new("TextButton")
             frame.Size=UDim2.new(1,-20,0,30)
             frame.Position=UDim2.new(0,10,0,tabData.YOffset)
             frame.BackgroundColor3=Color3.fromRGB(50,50,50)
+            frame.Text=text..": "..selected
+            frame.TextColor3=Color3.fromRGB(255,255,255)
+            frame.Font=Enum.Font.Gotham
+            frame.TextSize=16
             frame.Parent=tabContainer
-
-            local label = Instance.new("TextLabel")
-            label.Size=UDim2.new(1,0,1,0)
-            label.Text=text..": "..selected
-            label.TextColor3=Color3.fromRGB(255,255,255)
-            label.BackgroundTransparency=1
-            label.Font=Enum.Font.Gotham
-            label.TextSize=16
-            label.Parent=frame
 
             local open=false
             frame.MouseButton1Click:Connect(function()
@@ -246,7 +234,7 @@ function MinimalFluentRayfield:CreateWindow(title)
                         opt.Parent=frame
                         opt.MouseButton1Click:Connect(function()
                             selected=v
-                            label.Text=text..": "..v
+                            frame.Text=text..": "..v
                             for _,c in ipairs(frame:GetChildren()) do
                                 if c:IsA("TextButton") and c~=opt then c:Destroy() end
                             end
@@ -257,13 +245,13 @@ function MinimalFluentRayfield:CreateWindow(title)
                     end
                 else
                     for _,c in ipairs(frame:GetChildren()) do
-                        if c:IsA("TextButton") and c~=label then c:Destroy() end
+                        if c:IsA("TextButton") and c~=frame then c:Destroy() end
                     end
                 end
             end)
 
             tabData.YOffset = tabData.YOffset + 40
-            updateCanvasSize(tabContainer)
+            updateCanvasSize(tabData)
         end
 
         -- =================== Add Slider ===================
@@ -287,14 +275,10 @@ function MinimalFluentRayfield:CreateWindow(title)
 
             local dragging=false
             frame.InputBegan:Connect(function(input)
-                if input.UserInputType==Enum.UserInputType.MouseButton1 then
-                    dragging=true
-                end
+                if input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true end
             end)
             frame.InputEnded:Connect(function(input)
-                if input.UserInputType==Enum.UserInputType.MouseButton1 then
-                    dragging=false
-                end
+                if input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
             end)
             frame.InputChanged:Connect(function(input)
                 if input.UserInputType==Enum.UserInputType.MouseMovement and dragging then
@@ -309,10 +293,18 @@ function MinimalFluentRayfield:CreateWindow(title)
             end)
 
             tabData.YOffset = tabData.YOffset + 40
-            updateCanvasSize(tabContainer)
+            updateCanvasSize(tabData)
         end
 
+        -- =================== Fine AddTab ===================
         return tabData
+    end
+
+    -- Mostra la prima tab automaticamente
+    for _, tab in pairs(Tabs) do
+        tab.Container.Visible=true
+        currentTab=tab.Container
+        break
     end
 
     return window
