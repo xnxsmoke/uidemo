@@ -2,7 +2,6 @@
 -- Lightweight Rayfield-like UI for Roblox with autosave config
 -- Place as a single file on GitHub and load with loadstring(HttpGet(...))
 
--- Minimal strict-ish
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
@@ -26,12 +25,14 @@ local function safeIsFile(path)
     local ok, res = pcall(isfile, path)
     return ok and res
 end
+
 local function safeReadFile(path)
     if not hasReadFile then return nil end
     local ok, res = pcall(readfile, path)
     if ok then return res end
     return nil
 end
+
 local function safeWriteFile(path, data)
     if not hasWriteFile then return false end
     local ok, res = pcall(writefile, path, data)
@@ -68,14 +69,10 @@ RayLite.Themes = {
 local function make(cls, props, children)
     local inst = Instance.new(cls)
     if props then
-        for k,v in pairs(props) do
-            inst[k] = v
-        end
+        for k,v in pairs(props) do inst[k] = v end
     end
     if children then
-        for _,c in ipairs(children) do
-            c.Parent = inst
-        end
+        for _,c in ipairs(children) do c.Parent = inst end
     end
     return inst
 end
@@ -119,6 +116,7 @@ local function safeJsonEncode(t)
     if ok then return s end
     return "{}"
 end
+
 local function safeJsonDecode(s)
     local ok, t = pcall(function() return HttpService:JSONDecode(s) end)
     if ok then return t end
@@ -126,7 +124,6 @@ local function safeJsonDecode(s)
 end
 
 local function filePathFor(name)
-    -- use a predictable filename
     return "RayLite_" .. tostring(name) .. ".json"
 end
 
@@ -147,17 +144,14 @@ local function loadConfigFromFile(name)
 end
 
 local function saveConfigToPlayerGui(name, tbl)
-    -- fallback: store on PlayerGui as attribute (won't persist between sessions)
     local ok, pg = pcall(function() return LocalPlayer:WaitForChild("PlayerGui",5) end)
     if not ok or not pg then return false end
     local key = "RayLiteConfig_" .. tostring(name)
     local raw = safeJsonEncode(tbl)
-    -- Attributes are strings/numbers/booleans; use SetAttribute
     if pg.SetAttribute then
         pcall(function() pg:SetAttribute(key, raw) end)
         return true
     else
-        -- older fallback: store as value object
         local existing = pg:FindFirstChild(key)
         if existing and existing:IsA("StringValue") then existing.Value = raw
         else
@@ -191,6 +185,7 @@ local function SaveConfig(name, payload)
         return saveConfigToPlayerGui(name, payload)
     end
 end
+
 local function LoadConfig(name)
     if hasReadFile and hasIsFile then
         local t = loadConfigFromFile(name)
@@ -202,7 +197,6 @@ end
 --========================
 -- UI Core: CreateWindow
 --========================
--- options: Title, Theme, AutoSave (bool), ConfigName (string)
 function RayLite.CreateWindow(options)
     options = options or {}
     local theme = options.Theme or RayLite.Themes.Dark
@@ -210,7 +204,6 @@ function RayLite.CreateWindow(options)
     local autoSave = (options.AutoSave == nil) and true or options.AutoSave
     local configName = options.ConfigName or "default"
 
-    -- ScreenGui
     local screenGui = make("ScreenGui", {
         Name = "RayLite_UI",
         ResetOnSpawn = false,
@@ -219,7 +212,6 @@ function RayLite.CreateWindow(options)
     })
     screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
-    -- window
     local window = make("Frame", {
         Name = "Window",
         Size = UDim2.fromOffset(560, 360),
@@ -232,7 +224,6 @@ function RayLite.CreateWindow(options)
     })
     window.Parent = screenGui
 
-    -- topbar and title
     local topbar = make("Frame", {Size = UDim2.new(1,0,0,36), BackgroundTransparency = 1})
     topbar.Parent = window
     local titleLbl = make("TextLabel", {
@@ -247,7 +238,6 @@ function RayLite.CreateWindow(options)
     })
     titleLbl.Parent = topbar
 
-    -- tabs bar
     local tabsBar = make("Frame", {
         Position = UDim2.fromOffset(12, 44),
         Size = UDim2.new(1, -24, 0, 32),
@@ -257,7 +247,6 @@ function RayLite.CreateWindow(options)
     })
     tabsBar.Parent = window
 
-    -- pages holder
     local pagesHolder = make("Frame", {
         Position = UDim2.fromOffset(12, 84),
         Size = UDim2.new(1, -24, 1, -96),
@@ -268,16 +257,13 @@ function RayLite.CreateWindow(options)
 
     makeDraggable(window, topbar)
 
-    -- internal state
     local state = {
         theme = theme,
-        entries = {}, -- will keep controls for saving/loading
+        entries = {},
     }
 
-    -- API object to return
     local api = {}
 
-    -- Save/Load all saved values
     function api:SaveConfig()
         local out = {}
         for k, v in pairs(state.entries) do
@@ -312,10 +298,8 @@ function RayLite.CreateWindow(options)
         end
     end
 
-    -- autosave helper: when control changes, save if enabled
     local function scheduleAutoSave()
         if not autoSave then return end
-        -- lightweight debounce: small delay to group changes
         if state._autosaveTimer then
             state._autosaveTimer:Cancel()
             state._autosaveTimer = nil
@@ -333,7 +317,6 @@ function RayLite.CreateWindow(options)
         end)
     end
 
-    -- create a tab
     function api:AddTab(name)
         local tabBtn = make("TextButton", {
             Text = name,
@@ -369,7 +352,6 @@ function RayLite.CreateWindow(options)
                 if p:IsA("ScrollingFrame") then p.Visible = false end
             end
             page.Visible = true
-            -- style current button
             for _,b in ipairs(tabsBar:GetChildren()) do
                 if b:IsA("TextButton") then
                     tween(b,0.15,{BackgroundColor3 = state.theme.BG}):Play()
@@ -450,7 +432,6 @@ function RayLite.CreateWindow(options)
             end
 
             function secApi:AddToggle(key, default, onChanged)
-                -- key: unique string used for autosave index
                 local stateValue = default and true or false
                 local row = make("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,32)}, {
                     make("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,8)})
@@ -568,7 +549,6 @@ function RayLite.CreateWindow(options)
                     end
                 end)
 
-                -- initial register
                 state.entries[key] = {
                     Type = "Slider",
                     Get = function() return val end,
@@ -746,8 +726,8 @@ function RayLite.CreateWindow(options)
         return tabApi
     end
 
-    -- public save/load exposure
     function api:SetTheme(newTheme) state.theme = newTheme; window.BackgroundColor3 = newTheme.Panel end
+
     function api:Notify(title, text, dur)
         dur = dur or 3
         local toast = make("Frame", {Size=UDim2.new(0,280,0,64), BackgroundColor3 = state.theme.Panel}, {
@@ -766,10 +746,8 @@ function RayLite.CreateWindow(options)
         end)
     end
 
-    -- load stored config (if present)
     pcall(function() api:LoadConfig() end)
 
-    -- expose methods
     api.SaveConfig = function() api:SaveConfig() end
     api.LoadConfig = function() api:LoadConfig() end
     api.SetTheme = api.SetTheme
