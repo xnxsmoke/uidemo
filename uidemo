@@ -1,221 +1,782 @@
--- =================== MinimalFluentRayfield Completo Aggiornato ===================
-local MinimalFluentRayfield = {}
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
+-- RayLite.lua
+-- Lightweight Rayfield-like UI for Roblox with autosave config
+-- Place as a single file on GitHub and load with loadstring(HttpGet(...))
+
+-- Minimal strict-ish
 local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Config auto-save
-local Configs = {}
-local ConfigName = "MinimalFluentRayfieldConfig"
+local RayLite = {}
+RayLite.__version = "0.1.0"
 
-local function LoadConfig()
-    local folder = PlayerGui:FindFirstChild(ConfigName)
-    if folder and folder:FindFirstChild("Data") then
-        local success, decoded = pcall(HttpService.JSONDecode, HttpService, folder.Data.Value)
-        if success and type(decoded) == "table" then
-            Configs = decoded
+--========================
+-- Config persistence detection
+--========================
+local hasWriteFile, hasReadFile, hasIsFile = false, false, false
+if typeof(writefile) == "function" then hasWriteFile = true end
+if typeof(readfile) == "function" then hasReadFile = true end
+if typeof(isfile) == "function" then hasIsFile = true end
+
+-- safe wrappers
+local function safeIsFile(path)
+    if not hasIsFile then return false end
+    local ok, res = pcall(isfile, path)
+    return ok and res
+end
+local function safeReadFile(path)
+    if not hasReadFile then return nil end
+    local ok, res = pcall(readfile, path)
+    if ok then return res end
+    return nil
+end
+local function safeWriteFile(path, data)
+    if not hasWriteFile then return false end
+    local ok, res = pcall(writefile, path, data)
+    return ok
+end
+
+--========================
+-- Default themes
+--========================
+RayLite.Themes = {
+    Dark = {
+        BG = Color3.fromRGB(20,20,22),
+        Panel = Color3.fromRGB(28,28,30),
+        Accent = Color3.fromRGB(100,116,255),
+        Text = Color3.fromRGB(232,232,236),
+        SubText = Color3.fromRGB(170,170,180),
+        Stroke = Color3.fromRGB(50,50,55),
+        Hover = Color3.fromRGB(40,40,46),
+        Good = Color3.fromRGB(46,204,113),
+    },
+    Light = {
+        BG = Color3.fromRGB(250,250,252),
+        Panel = Color3.fromRGB(240,240,245),
+        Accent = Color3.fromRGB(55,94,255),
+        Text = Color3.fromRGB(20,20,22),
+        SubText = Color3.fromRGB(90,90,100),
+        Stroke = Color3.fromRGB(220,220,225),
+        Hover = Color3.fromRGB(230,230,235),
+        Good = Color3.fromRGB(46,204,113),
+    }
+}
+
+-- Utility: make instance quickly
+local function make(cls, props, children)
+    local inst = Instance.new(cls)
+    if props then
+        for k,v in pairs(props) do
+            inst[k] = v
         end
+    end
+    if children then
+        for _,c in ipairs(children) do
+            c.Parent = inst
+        end
+    end
+    return inst
+end
+
+local function tween(obj, t, props)
+    return TweenService:Create(obj, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+end
+
+-- Dragging helper
+local function makeDraggable(frame, handle)
+    handle = handle or frame
+    local dragging,dragStart,startPos = false,nil,nil
+    handle.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = inp.Position
+            startPos = frame.Position
+        end
+    end)
+    handle.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    RunService.RenderStepped:Connect(function()
+        if dragging and dragStart and startPos then
+            local mouse = LocalPlayer:GetMouse()
+            local delta = mouse.Delta
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+                                       startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+end
+
+--========================
+-- Config: Save / Load
+-- Supports both file-based (exploit) and PlayerGui attribute fallback
+--========================
+local function safeJsonEncode(t)
+    local ok, s = pcall(function() return HttpService:JSONEncode(t) end)
+    if ok then return s end
+    return "{}"
+end
+local function safeJsonDecode(s)
+    local ok, t = pcall(function() return HttpService:JSONDecode(s) end)
+    if ok then return t end
+    return {}
+end
+
+local function filePathFor(name)
+    -- use a predictable filename
+    return "RayLite_" .. tostring(name) .. ".json"
+end
+
+local function saveConfigToFile(name, tbl)
+    if not hasWriteFile then return false end
+    local path = filePathFor(name)
+    local data = safeJsonEncode(tbl)
+    return safeWriteFile(path, data)
+end
+
+local function loadConfigFromFile(name)
+    if not (hasReadFile and hasIsFile) then return nil end
+    local path = filePathFor(name)
+    if not safeIsFile(path) then return nil end
+    local raw = safeReadFile(path)
+    if not raw then return nil end
+    return safeJsonDecode(raw)
+end
+
+local function saveConfigToPlayerGui(name, tbl)
+    -- fallback: store on PlayerGui as attribute (won't persist between sessions)
+    local ok, pg = pcall(function() return LocalPlayer:WaitForChild("PlayerGui",5) end)
+    if not ok or not pg then return false end
+    local key = "RayLiteConfig_" .. tostring(name)
+    local raw = safeJsonEncode(tbl)
+    -- Attributes are strings/numbers/booleans; use SetAttribute
+    if pg.SetAttribute then
+        pcall(function() pg:SetAttribute(key, raw) end)
+        return true
+    else
+        -- older fallback: store as value object
+        local existing = pg:FindFirstChild(key)
+        if existing and existing:IsA("StringValue") then existing.Value = raw
+        else
+            local sv = Instance.new("StringValue")
+            sv.Name = key
+            sv.Value = raw
+            sv.Parent = pg
+        end
+        return true
     end
 end
 
-local function SaveConfig()
-    local folder = PlayerGui:FindFirstChild(ConfigName) or Instance.new("Folder")
-    folder.Name = ConfigName
-    folder.Parent = PlayerGui
-    local data = folder:FindFirstChild("Data") or Instance.new("StringValue")
-    data.Name = "Data"
-    data.Value = HttpService:JSONEncode(Configs)
-    data.Parent = folder
+local function loadConfigFromPlayerGui(name)
+    local ok, pg = pcall(function() return LocalPlayer:WaitForChild("PlayerGui",5) end)
+    if not ok or not pg then return nil end
+    local key = "RayLiteConfig_" .. tostring(name)
+    if pg.GetAttribute then
+        local raw = pg:GetAttribute(key)
+        if raw then return safeJsonDecode(raw) end
+    else
+        local sv = pg:FindFirstChild(key)
+        if sv and sv:IsA("StringValue") then return safeJsonDecode(sv.Value) end
+    end
+    return nil
 end
 
-LoadConfig()
-
--- =================== Create Window ===================
-function MinimalFluentRayfield:CreateWindow(title)
-    -- Remove old UI
-    local existing = PlayerGui:FindFirstChild("MinimalFluentRayfieldUI")
-    if existing then existing:Destroy() end
-
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "MinimalFluentRayfieldUI"
-    ScreenGui.ResetOnSpawn = false
-    ScreenGui.Parent = PlayerGui
-
-    local Frame = Instance.new("Frame")
-    Frame.Size = UDim2.new(0,580,0,450) -- Larghezza aumentata
-    Frame.Position = UDim2.new(0.5,-290,0.5,-225)
-    Frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
-    Frame.BorderSizePixel = 0
-    Frame.Parent = ScreenGui
-    Frame.ClipsDescendants = true
-
-    -- Title
-    local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Size = UDim2.new(1,0,0,40)
-    TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = title
-    TitleLabel.Font = Enum.Font.GothamBold
-    TitleLabel.TextSize = 20
-    TitleLabel.TextColor3 = Color3.fromRGB(255,255,255)
-    TitleLabel.Parent = Frame
-
-    -- =================== Drag & Move ===================
-    local dragging=false
-    local dragInput=nil
-    local dragStart=nil
-    local startPos=nil
-    local function updatePosition(input)
-        local delta = input.Position - dragStart
-        Frame.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
-        )
+local function SaveConfig(name, payload)
+    if hasWriteFile then
+        return saveConfigToFile(name, payload)
+    else
+        return saveConfigToPlayerGui(name, payload)
     end
-    TitleLabel.InputBegan:Connect(function(input)
-        if input.UserInputType==Enum.UserInputType.MouseButton1 then
-            dragging=true
-            dragStart=input.Position
-            startPos=Frame.Position
-            input.Changed:Connect(function()
-                if input.UserInputState==Enum.UserInputState.End then dragging=false end
-            end)
-        end
-    end)
-    TitleLabel.InputChanged:Connect(function(input)
-        if input.UserInputType==Enum.UserInputType.MouseMovement then
-            dragInput=input
-        end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and input==dragInput then
-            updatePosition(input)
-        end
-    end)
+end
+local function LoadConfig(name)
+    if hasReadFile and hasIsFile then
+        local t = loadConfigFromFile(name)
+        if t then return t end
+    end
+    return loadConfigFromPlayerGui(name)
+end
 
-    -- =================== Minimizzazione CTRL ===================
-    local isMinimized=false
-    UserInputService.InputBegan:Connect(function(input,processed)
-        if processed then return end
-        if input.KeyCode==Enum.KeyCode.LeftControl then
-            if isMinimized then
-                Frame.Size=UDim2.new(0,580,0,450)
-                isMinimized=false
-            else
-                Frame.Size=UDim2.new(0,580,0,40)
-                isMinimized=true
+--========================
+-- UI Core: CreateWindow
+--========================
+-- options: Title, Theme, AutoSave (bool), ConfigName (string)
+function RayLite.CreateWindow(options)
+    options = options or {}
+    local theme = options.Theme or RayLite.Themes.Dark
+    local title = options.Title or "RayLite"
+    local autoSave = (options.AutoSave == nil) and true or options.AutoSave
+    local configName = options.ConfigName or "default"
+
+    -- ScreenGui
+    local screenGui = make("ScreenGui", {
+        Name = "RayLite_UI",
+        ResetOnSpawn = false,
+        IgnoreGuiInset = true,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    })
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+    -- window
+    local window = make("Frame", {
+        Name = "Window",
+        Size = UDim2.fromOffset(560, 360),
+        Position = UDim2.fromOffset(80, 80),
+        BackgroundColor3 = theme.Panel,
+        BorderSizePixel = 0
+    }, {
+        make("UICorner",{CornerRadius=UDim.new(0,10)}),
+        make("UIStroke",{Color=theme.Stroke, Thickness=1})
+    })
+    window.Parent = screenGui
+
+    -- topbar and title
+    local topbar = make("Frame", {Size = UDim2.new(1,0,0,36), BackgroundTransparency = 1})
+    topbar.Parent = window
+    local titleLbl = make("TextLabel", {
+        Text = title,
+        Font = Enum.Font.GothamBold,
+        TextSize = 16,
+        TextColor3 = theme.Text,
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(12,0),
+        Size = UDim2.fromScale(0.5,1),
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+    titleLbl.Parent = topbar
+
+    -- tabs bar
+    local tabsBar = make("Frame", {
+        Position = UDim2.fromOffset(12, 44),
+        Size = UDim2.new(1, -24, 0, 32),
+        BackgroundTransparency = 1
+    }, {
+        make("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,8)})
+    })
+    tabsBar.Parent = window
+
+    -- pages holder
+    local pagesHolder = make("Frame", {
+        Position = UDim2.fromOffset(12, 84),
+        Size = UDim2.new(1, -24, 1, -96),
+        BackgroundTransparency = 1,
+        ClipsDescendants = true
+    })
+    pagesHolder.Parent = window
+
+    makeDraggable(window, topbar)
+
+    -- internal state
+    local state = {
+        theme = theme,
+        entries = {}, -- will keep controls for saving/loading
+    }
+
+    -- API object to return
+    local api = {}
+
+    -- Save/Load all saved values
+    function api:SaveConfig()
+        local out = {}
+        for k, v in pairs(state.entries) do
+            if v.Type == "Toggle" then
+                out[k] = v.Get()
+            elseif v.Type == "Slider" then
+                out[k] = v.Get()
+            elseif v.Type == "Dropdown" then
+                out[k] = v.GetIndex()
+            elseif v.Type == "Input" then
+                out[k] = v.Get()
             end
         end
-    end)
+        SaveConfig(configName, out)
+    end
 
-    -- =================== Tab Bar ===================
-    local TabBar = Instance.new("Frame")
-    TabBar.Size = UDim2.new(1,0,0,40)
-    TabBar.Position = UDim2.new(0,0,0,40)
-    TabBar.BackgroundColor3 = Color3.fromRGB(35,35,35)
-    TabBar.Parent = Frame
+    function api:LoadConfig()
+        local cfg = LoadConfig(configName) or {}
+        for k, v in pairs(cfg) do
+            local entry = state.entries[k]
+            if entry then
+                if entry.Type == "Toggle" and entry.Set then
+                    pcall(entry.Set, v)
+                elseif entry.Type == "Slider" and entry.Set then
+                    pcall(entry.Set, v)
+                elseif entry.Type == "Dropdown" and entry.SetIndex then
+                    pcall(entry.SetIndex, v)
+                elseif entry.Type == "Input" and entry.Set then
+                    pcall(entry.Set, v)
+                end
+            end
+        end
+    end
 
-    local Tabs = {}
-    local currentTab = nil
-
-    local ContentFrame = Instance.new("Frame")
-    ContentFrame.Size = UDim2.new(1,0,1,-80)
-    ContentFrame.Position = UDim2.new(0,0,0,80)
-    ContentFrame.BackgroundTransparency = 1
-    ContentFrame.ClipsDescendants = true
-    ContentFrame.Parent = Frame
-
-    local window = {Frame=Frame, Tabs=Tabs, ContentFrame=ContentFrame}
-
-    -- =================== Add Tab ===================
-    function window:AddTab(name)
-        local btn = Instance.new("TextButton")
-        btn.Font = Enum.Font.Gotham
-        btn.TextSize = 16
-        btn.TextColor3 = Color3.fromRGB(255,255,255)
-        btn.BackgroundColor3 = Color3.fromRGB(45,45,45)
-        btn.Text = name
-        btn.Parent = TabBar
-
-        local tabContainer = Instance.new("ScrollingFrame")
-        tabContainer.Size = UDim2.new(1,0,1,0)
-        tabContainer.CanvasSize = UDim2.new(0,0,0,0)
-        tabContainer.ScrollBarThickness = 6
-        tabContainer.BackgroundTransparency = 1
-        tabContainer.Visible = false
-        tabContainer.Parent = ContentFrame
-
-        local tabCount = #Tabs + 1
-        btn.Size = UDim2.new(1/tabCount, -5,1,0)
-        btn.Position = UDim2.new((tabCount-1)/tabCount,2,0,0)
-
-        btn.MouseButton1Click:Connect(function()
-            for _,t in pairs(Tabs) do t.Container.Visible=false end
-            tabContainer.Visible=true
-            currentTab=tabContainer
+    -- autosave helper: when control changes, save if enabled
+    local function scheduleAutoSave()
+        if not autoSave then return end
+        -- lightweight debounce: small delay to group changes
+        if state._autosaveTimer then
+            state._autosaveTimer:Cancel()
+            state._autosaveTimer = nil
+        end
+        local cancelled = false
+        local timer = {
+            Cancel = function() cancelled = true end
+        }
+        state._autosaveTimer = timer
+        task.spawn(function()
+            task.wait(0.6)
+            if cancelled then return end
+            pcall(function() api:SaveConfig() end)
+            state._autosaveTimer = nil
         end)
-
-        local tabData = {Button=btn, Container=tabContainer, YOffset=0}
-        Tabs[name]=tabData
-
-        -- Widgets: AddButton, AddToggle, AddDropdown, AddSlider
-        function tabData:AddButton(text,callback)
-            local b = Instance.new("TextButton")
-            b.Size=UDim2.new(1,-20,0,30)
-            b.Position=UDim2.new(0,10,0,tabData.YOffset)
-            b.BackgroundColor3=Color3.fromRGB(50,50,50)
-            b.Text=text
-            b.TextColor3=Color3.fromRGB(255,255,255)
-            b.Font=Enum.Font.Gotham
-            b.TextSize=16
-            b.Parent=tabContainer
-            b.MouseButton1Click:Connect(callback)
-            tabData.YOffset = tabData.YOffset + 40
-            tabData.Container.CanvasSize = UDim2.new(0,0,0,tabData.YOffset+20)
-        end
-
-        function tabData:AddToggle(text,default,callback)
-            local key=text
-            local state = Configs[key] ~= nil and Configs[key] or default
-            local t = Instance.new("TextButton")
-            t.Size=UDim2.new(1,-20,0,30)
-            t.Position=UDim2.new(0,10,0,tabData.YOffset)
-            t.BackgroundColor3=Color3.fromRGB(50,50,50)
-            t.Text=text..": "..(state and "ON" or "OFF")
-            t.TextColor3=Color3.fromRGB(255,255,255)
-            t.Font=Enum.Font.Gotham
-            t.TextSize=16
-            t.Parent=tabContainer
-            t.MouseButton1Click:Connect(function()
-                state = not state
-                t.Text=text..": "..(state and "ON" or "OFF")
-                Configs[key] = state
-                SaveConfig()
-                callback(state)
-            end)
-            tabData.YOffset = tabData.YOffset + 40
-            tabData.Container.CanvasSize = UDim2.new(0,0,0,tabData.YOffset+20)
-        end
-
-        -- AddDropdown and AddSlider remain the same as previous raw
-
-        return tabData
     end
 
-    -- Mostra la prima tab automaticamente
-    local firstShown=false
-    for _,tab in pairs(Tabs) do tab.Container.Visible=false end
-    for _,tab in pairs(Tabs) do
-        tab.Container.Visible=true
-        currentTab=tab.Container
-        firstShown=true
-        break
+    -- create a tab
+    function api:AddTab(name)
+        local tabBtn = make("TextButton", {
+            Text = name,
+            AutoButtonColor = false,
+            Font = Enum.Font.Gotham,
+            TextSize = 14,
+            TextColor3 = state.theme.Text,
+            BackgroundColor3 = state.theme.BG,
+            Size = UDim2.fromOffset(120, 28)
+        }, {
+            make("UICorner",{CornerRadius=UDim.new(0,8)}),
+            make("UIStroke",{Color=state.theme.Stroke, Thickness=1})
+        })
+        tabBtn.Parent = tabsBar
+
+        local page = make("ScrollingFrame", {
+            Name = "Page_"..name,
+            Visible = false,
+            Size = UDim2.fromScale(1,1),
+            BackgroundTransparency = 1,
+            CanvasSize = UDim2.new(0,0,0,0),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            ScrollBarThickness = 6
+        }, {
+            make("UIListLayout",{Padding=UDim.new(0,12), SortOrder=Enum.SortOrder.LayoutOrder})
+        })
+        page.Parent = pagesHolder
+
+        local tabApi = {}
+
+        function tabApi:_select()
+            for _,p in ipairs(pagesHolder:GetChildren()) do
+                if p:IsA("ScrollingFrame") then p.Visible = false end
+            end
+            page.Visible = true
+            -- style current button
+            for _,b in ipairs(tabsBar:GetChildren()) do
+                if b:IsA("TextButton") then
+                    tween(b,0.15,{BackgroundColor3 = state.theme.BG}):Play()
+                end
+            end
+            tween(tabBtn,0.15,{BackgroundColor3 = state.theme.Hover}):Play()
+        end
+
+        tabBtn.MouseButton1Click:Connect(function() tabApi:_select() end)
+        if #tabsBar:GetChildren() == 1 then
+            tabApi:_select()
+        end
+
+        function tabApi:AddSection(secName)
+            local section = make("Frame", {
+                BackgroundColor3 = state.theme.Panel,
+                BorderSizePixel = 0,
+                Size = UDim2.new(1,0,0,0)
+            }, {
+                make("UICorner",{CornerRadius=UDim.new(0,8)}),
+                make("UIStroke",{Color=state.theme.Stroke, Thickness=1})
+            })
+            section.Parent = page
+
+            local header = make("TextLabel", {
+                Text = secName,
+                Font = Enum.Font.GothamBold,
+                TextSize = 14,
+                TextColor3 = state.theme.Text,
+                BackgroundTransparency = 1,
+                Position = UDim2.fromOffset(10,8),
+                Size = UDim2.new(1,-20,0,20),
+                TextXAlignment = Enum.TextXAlignment.Left
+            })
+            header.Parent = section
+
+            local container = make("Frame", {
+                BackgroundTransparency = 1,
+                Position = UDim2.fromOffset(10,30),
+                Size = UDim2.new(1,-20,0,0),
+                Name = "Container"
+            }, {
+                make("UIListLayout",{Padding=UDim.new(0,8), SortOrder=Enum.SortOrder.LayoutOrder})
+            })
+            container.Parent = section
+
+            local function resize()
+                local y = 30
+                for _,c in ipairs(container:GetChildren()) do
+                    if c:IsA("Frame") or c:IsA("TextButton") then
+                        y = y + c.AbsoluteSize.Y + 8
+                    end
+                end
+                section.Size = UDim2.new(1,0,0, math.max(70,y))
+            end
+            container.ChildAdded:Connect(function() task.wait(); resize() end)
+
+            local secApi = {}
+
+            function secApi:AddButton(text, callback)
+                local btn = make("TextButton", {
+                    Text = text,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 14,
+                    TextColor3 = state.theme.Text,
+                    AutoButtonColor = false,
+                    BackgroundColor3 = state.theme.Panel,
+                    Size = UDim2.new(1,0,0,32)
+                }, {
+                    make("UICorner",{CornerRadius=UDim.new(0,6)}),
+                    make("UIStroke",{Color=state.theme.Stroke, Thickness=1})
+                })
+                btn.MouseEnter:Connect(function() tween(btn,0.1,{BackgroundColor3=state.theme.Hover}):Play() end)
+                btn.MouseLeave:Connect(function() tween(btn,0.1,{BackgroundColor3=state.theme.Panel}):Play() end)
+                btn.MouseButton1Click:Connect(function() if callback then pcall(callback) end end)
+                btn.Parent = container
+                return btn
+            end
+
+            function secApi:AddToggle(key, default, onChanged)
+                -- key: unique string used for autosave index
+                local stateValue = default and true or false
+                local row = make("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,32)}, {
+                    make("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,8)})
+                })
+                row.Parent = container
+
+                local lbl = make("TextLabel", {
+                    Text = key,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 14,
+                    TextColor3 = state.theme.Text,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1,-48,1,0),
+                    TextXAlignment = Enum.TextXAlignment.Left
+                })
+                lbl.Parent = row
+
+                local box = make("TextButton", {
+                    Text = "",
+                    AutoButtonColor = false,
+                    BackgroundColor3 = stateValue and state.theme.Good or state.theme.Panel,
+                    Size = UDim2.fromOffset(32,32)
+                }, {
+                    make("UICorner",{CornerRadius=UDim.new(0,6)}),
+                    make("UIStroke",{Color=state.theme.Stroke, Thickness=1})
+                })
+                box.Parent = row
+
+                local function set(val)
+                    stateValue = not not val
+                    tween(box,0.12,{BackgroundColor3 = stateValue and state.theme.Good or state.theme.Panel}):Play()
+                    if onChanged then pcall(onChanged, stateValue) end
+                    state.entries[key] = {
+                        Type = "Toggle",
+                        Get = function() return stateValue end,
+                        Set = function(v) set(v) end
+                    }
+                    scheduleAutoSave()
+                end
+                box.MouseButton1Click:Connect(function() set(not stateValue) end)
+                set(stateValue)
+                return {
+                    Set = set,
+                    Get = function() return stateValue end
+                }
+            end
+
+            function secApi:AddSlider(key, opts, onChanged)
+                opts = opts or {}
+                local min = opts.Min or 0
+                local max = opts.Max or 100
+                local step = opts.Step or 1
+                local val = math.clamp(opts.Default or min, min, max)
+
+                local frame = make("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,48)})
+                frame.Parent = container
+
+                local top = make("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,18)}, {
+                    make("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,8)})
+                })
+                top.Parent = frame
+
+                local label = make("TextLabel", {
+                    Text = string.format("%s: %s", key, tostring(val)),
+                    Font = Enum.Font.Gotham,
+                    TextSize = 13,
+                    TextColor3 = state.theme.Text,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1,0,1,0),
+                    TextXAlignment = Enum.TextXAlignment.Left
+                })
+                label.Parent = top
+
+                local track = make("Frame", {
+                    BackgroundColor3 = state.theme.Panel,
+                    Size = UDim2.new(1,0,0,10)
+                }, {
+                    make("UICorner",{CornerRadius=UDim.new(0,5)}),
+                    make("UIStroke",{Color=state.theme.Stroke, Thickness=1})
+                })
+                track.Parent = frame
+
+                local fill = make("Frame", {
+                    BackgroundColor3 = state.theme.Accent,
+                    Size = UDim2.new((val-min)/(max-min), 0, 1, 0)
+                }, { make("UICorner",{CornerRadius=UDim.new(0,5)}) })
+                fill.Parent = track
+
+                local dragging = false
+                track.InputBegan:Connect(function(inp)
+                    if inp.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end
+                end)
+                track.InputEnded:Connect(function(inp)
+                    if inp.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+                end)
+                track.InputChanged:Connect(function(inp)
+                    if dragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
+                        local rel = (inp.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X
+                        local newVal = min + rel*(max-min)
+                        newVal = math.clamp(math.round(newVal/step)*step, min, max)
+                        val = newVal
+                        label.Text = string.format("%s: %s", key, tostring(val))
+                        tween(fill, 0.08, {Size = UDim2.new((val-min)/(max-min),0,1,0)}):Play()
+                        if onChanged then pcall(onChanged, val) end
+                        state.entries[key] = {
+                            Type = "Slider",
+                            Get = function() return val end,
+                            Set = function(v)
+                                val = math.clamp(math.round(v/step)*step, min, max)
+                                label.Text = string.format("%s: %s", key, tostring(val))
+                                tween(fill, 0.12, {Size = UDim2.new((val-min)/(max-min),0,1,0)}):Play()
+                            end
+                        }
+                        scheduleAutoSave()
+                    end
+                end)
+
+                -- initial register
+                state.entries[key] = {
+                    Type = "Slider",
+                    Get = function() return val end,
+                    Set = function(v)
+                        val = math.clamp(math.round(v/step)*step, min, max)
+                        label.Text = string.format("%s: %s", key, tostring(val))
+                        tween(fill, 0.12, {Size = UDim2.new((val-min)/(max-min),0,1,0)}):Play()
+                        if onChanged then pcall(onChanged, val) end
+                        scheduleAutoSave()
+                    end
+                }
+
+                return {
+                    Set = state.entries[key].Set,
+                    Get = state.entries[key].Get
+                }
+            end
+
+            function secApi:AddDropdown(key, items, defaultIndex, onChanged)
+                items = items or {}
+                local selIndex = math.clamp(defaultIndex or 1, 1, #items)
+                local itemH = 28
+
+                local holder = make("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,itemH+24)})
+                holder.Parent = container
+
+                local label = make("TextLabel", {
+                    Text = key,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 13,
+                    TextColor3 = state.theme.Text,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1,0,0,18),
+                    TextXAlignment = Enum.TextXAlignment.Left
+                })
+                label.Parent = holder
+
+                local button = make("TextButton", {
+                    Text = items[selIndex] or "Select",
+                    Font = Enum.Font.Gotham,
+                    TextSize = 14,
+                    TextColor3 = state.theme.Text,
+                    AutoButtonColor = false,
+                    BackgroundColor3 = state.theme.Panel,
+                    Size = UDim2.new(1,0,0,itemH)
+                }, {
+                    make("UICorner",{CornerRadius=UDim.new(0,6)}),
+                    make("UIStroke",{Color=state.theme.Stroke, Thickness=1})
+                })
+                button.Parent = holder
+
+                local list = make("ScrollingFrame", {
+                    Visible = false,
+                    BackgroundColor3 = state.theme.BG,
+                    Size = UDim2.new(1,0,0, math.min(#items,5)*itemH + 8),
+                    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+                    ScrollBarThickness = 3
+                }, {
+                    make("UIListLayout",{Padding=UDim.new(0,4)})
+                })
+                list.Parent = holder
+
+                local expanded = false
+                local function setIndex(i)
+                    selIndex = math.clamp(i,1,#items)
+                    button.Text = items[selIndex] or "Select"
+                    if onChanged then pcall(onChanged, items[selIndex]) end
+                    state.entries[key] = {
+                        Type = "Dropdown",
+                        GetIndex = function() return selIndex end,
+                        Get = function() return items[selIndex] end,
+                        SetIndex = function(idx) setIndex(idx) end
+                    }
+                    scheduleAutoSave()
+                end
+
+                local function toggle()
+                    expanded = not expanded
+                    list.Visible = expanded
+                    if expanded then
+                        list:ClearAllChildren()
+                        for idx, nm in ipairs(items) do
+                            local opt = make("TextButton", {
+                                Text = nm,
+                                Font = Enum.Font.Gotham,
+                                TextSize = 13,
+                                TextColor3 = state.theme.Text,
+                                AutoButtonColor = false,
+                                BackgroundColor3 = (idx==selIndex) and state.theme.Hover or state.theme.Panel,
+                                Size = UDim2.new(1,0,0,itemH)
+                            }, {
+                                make("UICorner",{CornerRadius=UDim.new(0,6)}),
+                                make("UIStroke",{Color=state.theme.Stroke, Thickness=1})
+                            })
+                            opt.MouseButton1Click:Connect(function()
+                                setIndex(idx)
+                                toggle()
+                            end)
+                            opt.MouseEnter:Connect(function() tween(opt,0.08,{BackgroundColor3=state.theme.Hover}):Play() end)
+                            opt.MouseLeave:Connect(function() tween(opt,0.08,{BackgroundColor3 = (idx==selIndex) and state.theme.Hover or state.theme.Panel}):Play() end)
+                            opt.Parent = list
+                        end
+                    end
+                end
+
+                button.MouseButton1Click:Connect(toggle)
+                setIndex(selIndex)
+
+                return {
+                    SetIndex = setIndex,
+                    GetIndex = function() return selIndex end,
+                    Get = function() return items[selIndex] end,
+                    SetItems = function(newItems)
+                        items = newItems or {}
+                        setIndex(1)
+                    end
+                }
+            end
+
+            function secApi:AddInput(key, placeholder, default, onChanged)
+                local inputFrame = make("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,36)})
+                inputFrame.Parent = container
+
+                local lbl = make("TextLabel", {
+                    Text = key,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 13,
+                    TextColor3 = state.theme.Text,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1,0,0,18),
+                    TextXAlignment = Enum.TextXAlignment.Left
+                })
+                lbl.Parent = inputFrame
+
+                local box = make("TextBox", {
+                    Text = default or "",
+                    PlaceholderText = placeholder or "",
+                    Font = Enum.Font.Gotham,
+                    TextSize = 14,
+                    TextColor3 = state.theme.Text,
+                    BackgroundColor3 = state.theme.Panel,
+                    Size = UDim2.new(1,0,0,18),
+                    ClearTextOnFocus = false
+                }, {
+                    make("UICorner",{CornerRadius=UDim.new(0,6)}),
+                    make("UIStroke",{Color=state.theme.Stroke, Thickness=1})
+                })
+                box.Parent = inputFrame
+
+                local function set(v)
+                    box.Text = tostring(v or "")
+                    if onChanged then pcall(onChanged, box.Text) end
+                    state.entries[key] = {
+                        Type = "Input",
+                        Get = function() return box.Text end,
+                        Set = function(x) box.Text = tostring(x or "") end
+                    }
+                    scheduleAutoSave()
+                end
+                box.FocusLost:Connect(function(enter)
+                    if enter and onChanged then pcall(onChanged, box.Text) end
+                    scheduleAutoSave()
+                end)
+
+                set(default or "")
+                return {
+                    Set = set,
+                    Get = function() return box.Text end
+                }
+            end
+
+            return secApi
+        end
+
+        return tabApi
     end
 
-    return window
+    -- public save/load exposure
+    function api:SetTheme(newTheme) state.theme = newTheme; window.BackgroundColor3 = newTheme.Panel end
+    function api:Notify(title, text, dur)
+        dur = dur or 3
+        local toast = make("Frame", {Size=UDim2.new(0,280,0,64), BackgroundColor3 = state.theme.Panel}, {
+            make("UICorner",{CornerRadius=UDim.new(0,8)}),
+            make("UIStroke",{Color=state.theme.Stroke, Thickness=1})
+        })
+        toast.Parent = window
+        toast.Position = UDim2.new(1,-300,1,-80)
+        local ttl = make("TextLabel", {Text=title, Font=Enum.Font.GothamBold, TextSize=14, BackgroundTransparency=1, TextColor3 = state.theme.Text, Position=UDim2.fromOffset(8,6), Size=UDim2.new(1,-16,0,18), TextXAlignment=Enum.TextXAlignment.Left}); ttl.Parent = toast
+        local body = make("TextLabel", {Text=text, Font=Enum.Font.Gotham, TextSize=12, BackgroundTransparency=1, TextColor3 = state.theme.SubText, Position=UDim2.fromOffset(8,26), Size=UDim2.new(1,-16,0,30), TextXAlignment=Enum.TextXAlignment.Left}); body.Parent = toast
+        tween(toast,0.16,{BackgroundTransparency=0}):Play()
+        task.delay(dur, function()
+            tween(toast,0.16,{BackgroundTransparency=1}):Play()
+            task.wait(0.16)
+            pcall(function() toast:Destroy() end)
+        end)
+    end
+
+    -- load stored config (if present)
+    pcall(function() api:LoadConfig() end)
+
+    -- expose methods
+    api.SaveConfig = function() api:SaveConfig() end
+    api.LoadConfig = function() api:LoadConfig() end
+    api.SetTheme = api.SetTheme
+    api.AddTab = api.AddTab
+    api.Notify = api.Notify
+
+    return api
 end
 
-return MinimalFluentRayfield
+return RayLite
